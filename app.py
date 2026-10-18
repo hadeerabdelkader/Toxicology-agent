@@ -15,7 +15,7 @@ st.set_page_config(
 st.title("🧪 EHA Toxicology Triage Assistant")
 st.caption("Clinical decision support grounded in verified toxicology reference databases.")
 
-# 1. Load Knowledge Vector DB into memory (cached so it loads only once)
+# 1. Load Knowledge Vector DB into memory
 @st.cache_resource
 def load_resources():
     store_path = "./knowledge_vector_db"
@@ -27,10 +27,18 @@ def load_resources():
 
 embeddings, documents, metadata, embed_model = load_resources()
 
-# 2. Configure Gemini Client via Streamlit Secrets or Environment Variable
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key and "GEMINI_API_KEY" in st.secrets:
+# 2. Configure Gemini Client via Streamlit Secrets
+api_key = None
+if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
+elif "GOOGLE_API_KEY" in st.secrets:
+    api_key = st.secrets["GOOGLE_API_KEY"]
+else:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+
+if not api_key:
+    st.error("⚠️ API Key is missing. Please add GEMINI_API_KEY to your Streamlit App Secrets.")
+    st.stop()
 
 client = genai.Client(api_key=api_key)
 
@@ -38,15 +46,14 @@ SYSTEM_INSTRUCTION = """
 You are a senior Consultant Medical Toxicologist triage officer.
 
 Evaluate cases using this structured framework:
-1. Resuscitation & Immediate Danger Signs (Airway, vitals, toxic syndromes).
-2. Toxicokinetic Assessment (Weight-based dose in mg/kg vs threshold, absorption window).
-3. Targeted Management & Antidote Protocol (Decontamination window, specific antidote, labs, observation timeframe).
+1. Resuscitation & Immediate Danger Signs (Airway, vitals, toxic toxidromes).
+2. Toxicokinetic Assessment (Weight-based dose in mg/kg vs toxicity threshold, absorption window, trade name to generic active ingredient conversion like Cipralex -> Escitalopram).
+3. Targeted Management & Antidote Protocol (Decontamination window, specific antidote, laboratory workup, observation timeframe).
 
 GROUNDING RULES:
-- Base all guidance strictly on the retrieved knowledge base extracts.
-- If the queried substance/protocol is NOT present in the retrieved passages, output:
-  "⚠️ Knowledge Base Notice: The queried substance/protocol is not documented in the verified knowledge base. Would you like me to draw from external clinical toxicology references to answer this case?"
-- Only provide general external references if explicitly authorized by the user.
+- Use the provided knowledge base excerpts to formulate your clinical advice.
+- Recognize brand and trade names (e.g., Cipralex = escitalopram, Panadol = acetaminophen/paracetamol) and apply the corresponding management protocols from the excerpts.
+- If and ONLY if the substance or class is entirely absent from the excerpts and clinical context, state the notice asking to use external references.
 """
 
 # 3. Maintain chat session history
@@ -57,22 +64,33 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 4. Handle user clinical input
+# 4. Handle user input
 if prompt := st.chat_input("Enter clinical presentation, patient weight, substance, and ingested dose..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Fast in-memory vector similarity lookup
+    # Retrieval: Vector similarity search across local database
     q_vec = embed_model.encode([prompt], convert_to_numpy=True)
     q_norm = q_vec / np.linalg.norm(q_vec)
     db_norms = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     similarities = np.dot(db_norms, q_norm.T).flatten()
 
-    top_k = np.argsort(similarities)[::-1][:3]
-    context = "\n\n---\n\n".join([f"Source: {metadata[i]['source']}\n{documents[i]}" for i in top_k])
+    # Retrieve top 6 most relevant excerpts instead of 3
+    top_k = np.argsort(similarities)[::-1][:6]
+    context_chunks = []
+    for i in top_k:
+        src = metadata[i].get('source', 'Clinical Database') if isinstance(metadata[i], dict) else 'Clinical Database'
+        context_chunks.append(f"Source: {src}\n{documents[i]}")
+    context = "\n\n---\n\n".join(context_chunks)
 
-    full_prompt = f"Knowledge Base Excerpts:\n{context}\n\nCase Details:\n{prompt}"
+    full_prompt = f"""Verified Knowledge Base Context:
+{context}
+
+Patient Presentation / Case Details:
+{prompt}
+
+Provide a structured clinical toxicology consult based on the above information."""
 
     with st.chat_message("assistant"):
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
@@ -85,4 +103,4 @@ if prompt := st.chat_input("Enter clinical presentation, patient weight, substan
                 st.markdown(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as err:
-                st.error (f"API Error Details: {err}")
+                st.error(f"API Error Details: {err}")
