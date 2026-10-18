@@ -76,11 +76,13 @@ if prompt := st.chat_input("Enter clinical presentation, patient weight, substan
 
     with st.chat_message("assistant"):
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=full_prompt,
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
-            )
-            st.markdown(response.text)
-
-    st.session_state.messages.append({"role": "assistant", "content": response.text})
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
+                )
+                st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+            except Exception as err:
+                st.error (f"API Error Details: {err}")
