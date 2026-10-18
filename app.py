@@ -78,7 +78,7 @@ if prompt := st.chat_input("Enter clinical presentation, patient weight, substan
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-3.8-flash",
                     contents=full_prompt,
                     config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION)
                 )
