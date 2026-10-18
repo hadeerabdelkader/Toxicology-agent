@@ -183,14 +183,49 @@ Please evaluate this case following the exact clinical protocol and standard ope
     with st.chat_message("assistant"):
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
             try:
+                # 1. Disable safety blocks for medical toxicology queries
+                safety_settings = [
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                ]
+
+                # 2. Call Gemini with medical safety filters cleared
                 response = client.models.generate_content(
                     model="gemini-3.8-flash",
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=0.0)
+                        temperature=0.0,
+                        safety_settings=safety_settings
+                    )
                 )
-                st.markdown(response.text)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
+
+                # 3. Safely extract generated clinical text
+                reply = response.text if (hasattr(response, "text") and response.text) else ""
+                
+                if not reply and response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                    reply = f"⚠️ Generation halted by API (Status: {finish_reason})."
+
+                if reply:
+                    st.markdown(reply)
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+                else:
+                    st.warning("⚠️ No response content returned. Please check the logs.")
+
             except Exception as err:
                 st.error(f"API Error Details: {err}")
