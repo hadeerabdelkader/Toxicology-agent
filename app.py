@@ -140,8 +140,9 @@ Search and extract the protocol from the monograph's **(TREATMENT)** section:
 - **PROGNOSIS:** Anticipated clinical trajectory based on dose and timeliness of interventions.
 - **Psychological Referral:** If the exposure was with **intent to self-harm**, the patient MUST be referred for psychological/psychiatric assessment prior to discharge.
 
-### 7. 📑 Source Attribution
-- Explicitly cite the exact file path from `./knowledge/` (e.g., ``).
+### OUTPUT DIRECTIVE:
+- Do NOT output a "Source Attribution" section.
+- Do NOT include internal file paths, catalog paths, or document file names in your clinical response.
 
 """
 
@@ -195,7 +196,7 @@ if prompt := st.chat_input("Enter clinical presentation, patient weight, substan
 ### CLINICAL PRESENTATION & CASE QUERY:
 {prompt}
 
-Apply the 7 mandatory sections and exact weight-based calculations strictly from the references above."""
+Apply the 6 mandatory clinical consultation sections and exact weight-based calculations strictly from the references above. Do not include internal file paths or source attribution in the output."""
 
     with st.chat_message("assistant"):
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
