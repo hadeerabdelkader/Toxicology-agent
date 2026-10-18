@@ -248,8 +248,6 @@ Apply the 6 mandatory clinical consultation sections and exact weight-based calc
                 if reply:
                     st.markdown(reply)
                     st.session_state.messages.append({"role": "assistant", "content": reply})
-                    with st.expander("🔍 View Retrieved Knowledge Base Context"):
-                        st.markdown(context)
                 else:
                     st.warning("⚠️ No response content returned. Please check the logs.")
 
