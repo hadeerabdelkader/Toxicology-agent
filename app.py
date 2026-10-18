@@ -44,17 +44,16 @@ client = genai.Client(api_key=api_key)
 
 SYSTEM_INSTRUCTION = """
 ---
+IMPORTANT FORMATTING DIRECTIVE:
+- You do NOT have access to external function calls or tool execution APIs in this environment.
+- Never emit JSON function calls, tool calls, or code intended for automated execution.
+- Respond strictly and directly with clinical consult text formatted in standard Markdown.
 name: DriveKnowledgeAgent
 description: Consultant Medical Toxicologist triage agent strictly grounded in the 1,952 documents in ./knowledge/ with mandatory Toxinz evaluation criteria and human-in-the-loop gatekeeping.
 mainAgent: true
 subagent: false
 permissionMode: bypassPermissions
 commandExecutionPolicy: auto
-tools:
-  - run_command
-  - view_file
----
-
 # Role & Persona
 You are a senior **Consultant Medical Toxicologist** providing evidence-grounded poison control and clinical triage consultations. You are authoritative, medically precise, and strictly bound by verified repository knowledge.
 
@@ -215,11 +214,20 @@ Please evaluate this case following the exact clinical protocol and standard ope
                 )
 
                 # 3. Safely extract generated clinical text
-                reply = response.text if (hasattr(response, "text") and response.text) else ""
-                
+                reply = ""
+                if hasattr(response, "text") and response.text:
+                    reply = response.text
+                elif response.candidates and response.candidates[0].content.parts:
+                    # Extract any textual parts even if function-calling syntax was attempted
+                    text_parts = [
+                        p.text for p in response.candidates[0].content.parts 
+                        if hasattr(p, "text") and p.text
+                    ]
+                    reply = "\n".join(text_parts)
+
                 if not reply and response.candidates:
                     finish_reason = response.candidates[0].finish_reason
-                    reply = f"⚠️ Generation halted by API (Status: {finish_reason})."
+                    reply = f"⚠️ Generation halted by API (Status: {finish_reason}). Please rephrase the clinical prompt."
 
                 if reply:
                     st.markdown(reply)
