@@ -1,5 +1,6 @@
 import os
 import pickle
+import re
 import numpy as np
 import streamlit as st
 from sentence_transformers import SentenceTransformer
@@ -140,7 +141,7 @@ Search and extract the protocol from the monograph's **(TREATMENT)** section:
 - **Psychological Referral:** If the exposure was with **intent to self-harm**, the patient MUST be referred for psychological/psychiatric assessment prior to discharge.
 
 ### 7. 📑 Source Attribution
-- Explicitly cite the exact file path from `./knowledge/` (e.g., `[Source: .\knowledge\Medication\V\Verapamil.pdf]`).
+- Explicitly cite the exact file path from `./knowledge/` (e.g., ``).
 
 """
 
@@ -158,31 +159,47 @@ if prompt := st.chat_input("Enter clinical presentation, patient weight, substan
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Retrieval: Vector similarity search across local database
+    # Hybrid Retrieval: Vector similarity + Keyword Boosting
     q_vec = embed_model.encode([prompt], convert_to_numpy=True)
     q_norm = q_vec / np.linalg.norm(q_vec)
     db_norms = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     similarities = np.dot(db_norms, q_norm.T).flatten()
 
-    # Retrieve top 6 most relevant excerpts instead of 3
-    top_k = np.argsort(similarities)[::-1][:6]
+    # Extract alphanumeric query terms (length >= 4) to boost exact drug/chemical name matches
+    words = [w.lower() for w in re.findall(r"\b[A-Za-z]{4,}\b", prompt)]
+    boosts = np.zeros(len(documents))
+    for idx, doc in enumerate(documents):
+        doc_lower = doc.lower()
+        src_lower = ""
+        if isinstance(metadata[idx], dict):
+            src_lower = metadata[idx].get("source", "").lower()
+        for w in words:
+            if w in src_lower:
+                boosts[idx] += 0.35  # Priority boost if the document source/filename matches the substance
+            elif w in doc_lower:
+                boosts[idx] += 0.15  # Secondary boost if mentioned directly in the text
+
+    final_scores = similarities + boosts
+
+    # Retrieve top 12 chunks so complete monographs (evaluation, dosing, antidote, discharge) are included
+    top_indices = np.argsort(final_scores)[::-1][:12]
     context_chunks = []
-    for i in top_k:
+    for i in top_indices:
         src = metadata[i].get('source', 'Clinical Database') if isinstance(metadata[i], dict) else 'Clinical Database'
-        context_chunks.append(f"Source: {src}\n{documents[i]}")
+        context_chunks.append(f"\n{documents[i]}")
     context = "\n\n---\n\n".join(context_chunks)
 
-    full_prompt = f"""### GROUNDING KNOWLEDGE BASE REFERENCES:
+    full_prompt = f"""### GROUNDING KNOWLEDGE BASE REFERENCES (MANDATORY VERIFIED TOXINZ SOURCES):
 {context}
 
 ### CLINICAL PRESENTATION & CASE QUERY:
 {prompt}
 
-Please evaluate this case following the exact clinical protocol and standard operating procedures."""
+Apply the 7 mandatory sections and exact weight-based calculations strictly from the references above."""
+
     with st.chat_message("assistant"):
         with st.spinner("Analyzing case and cross-referencing knowledge base..."):
             try:
-                # 1. Disable safety blocks for medical toxicology queries
                 safety_settings = [
                     types.SafetySetting(
                         category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
@@ -202,23 +219,21 @@ Please evaluate this case following the exact clinical protocol and standard ope
                     ),
                 ]
 
-                # 2. Call Gemini with medical safety filters cleared
                 response = client.models.generate_content(
                     model="gemini-3.8-flash",
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
                         temperature=0.0,
+                        max_output_tokens=3072,
                         safety_settings=safety_settings
                     )
                 )
 
-                # 3. Safely extract generated clinical text
                 reply = ""
                 if hasattr(response, "text") and response.text:
                     reply = response.text
                 elif response.candidates and response.candidates[0].content.parts:
-                    # Extract any textual parts even if function-calling syntax was attempted
                     text_parts = [
                         p.text for p in response.candidates[0].content.parts 
                         if hasattr(p, "text") and p.text
@@ -232,6 +247,8 @@ Please evaluate this case following the exact clinical protocol and standard ope
                 if reply:
                     st.markdown(reply)
                     st.session_state.messages.append({"role": "assistant", "content": reply})
+                    with st.expander("🔍 View Retrieved Knowledge Base Context"):
+                        st.markdown(context)
                 else:
                     st.warning("⚠️ No response content returned. Please check the logs.")
 
